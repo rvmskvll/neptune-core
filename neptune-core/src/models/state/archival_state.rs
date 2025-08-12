@@ -3,8 +3,10 @@ use std::path::PathBuf;
 
 use anyhow::bail;
 use anyhow::Result;
+use itertools::Itertools;
 use memmap2::MmapOptions;
 use num_traits::Zero;
+use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tasm_lib::twenty_first::tip5::digest::Digest;
 use tokio::io::AsyncSeekExt;
@@ -36,6 +38,7 @@ use crate::models::database::BlockIndexValue;
 use crate::models::database::BlockRecord;
 use crate::models::database::FileRecord;
 use crate::models::database::LastFileRecord;
+use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::absolute_index_set::AbsoluteIndexSet;
@@ -356,6 +359,23 @@ impl ArchivalState {
         }
 
         debug!("Writing block to: {}", block_file_path.display());
+        debug!("***** block hash {} *****\n\n\n\n", new_block.hash());
+        debug!("block appendix: {}", Tip5::hash(new_block.appendix()));
+        debug!("block body: {}", Tip5::hash(new_block.body()));
+        debug!("block header: {}", Tip5::hash(new_block.header()));
+
+        debug!(
+            "block body leafs:\n{}",
+            new_block.body().merkle_tree().leafs().join("\n")
+        );
+        debug!(
+            "block header leafs:\n{}",
+            new_block.header().merkle_tree().leafs().join("\n")
+        );
+        debug!(
+            "block MSA after:\n{:x}",
+            new_block.mutator_set_accumulator_after().unwrap().hash()
+        );
         // Get associated file record from database, otherwise create it
         let file_record_key: BlockIndexKey = BlockIndexKey::File(last_rec.last_file);
         let file_record_value: Option<FileRecord> = self
