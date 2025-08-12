@@ -115,7 +115,12 @@ impl TypeScriptAndWitness {
             .into_iter()
             .flat_map(|d| d.reversed().values())
             .collect_vec();
+
+        println!("************ type script claim START ************\n\n\n\n");
+        println!("input [{}]", input.iter().join(", "));
         let claim = Claim::new(self.program.hash()).with_input(input);
+        println!("claim program_digest {}", claim.program_digest);
+        println!("claim version {}", claim.version);
 
         ProofBuilder::new()
             .program(self.program.clone())
