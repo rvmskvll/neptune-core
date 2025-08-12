@@ -95,6 +95,8 @@ impl ProofCollection {
             collect_type_scripts_witness,
         ) = Self::extract_specific_witnesses(primitive_witness);
 
+        println!("primitive_witness: {primitive_witness}");
+
         let txk_mast_hash = primitive_witness.kernel.mast_hash();
         let txk_mast_hash_as_input = PublicInput::new(txk_mast_hash.reversed().values().to_vec());
         let salted_inputs_hash = Hash::hash(&primitive_witness.input_utxos);
