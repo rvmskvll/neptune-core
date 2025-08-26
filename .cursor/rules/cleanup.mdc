@@ -1,0 +1,42 @@
+---
+alwaysApply: true
+---
+
+## Core Rule: Post-Edit Cleanup Operations
+
+This rule requires a systematic cleanup process after any code edit, update, or modification in a Rust project. The goal is to keep the codebase clean, efficient, and organized. It focuses on dependencies, code, files, and Rust-specific best practices. Only perform cleanup for changes directly related to the recent edit or those that clearly improve project health. Avoid making unrelated modifications.
+
+### 1. Dependency Cleanup
+
+- Review the codebase for dependencies listed in Cargo.toml (and Cargo.lock).
+- Remove any dependency no longer imported or used after the edit:
+  - Edit Cargo.toml to remove the unused crate.
+  - Run `cargo check` or `cargo build` to update Cargo.lock.
+  - Use `cargo unused` or manually check with tools like `cargo-udeps` if available (do not install new tools unless already present).
+- Update lock files: Always run `cargo generate-lockfile` if needed after changes.
+- Verify no functionality breaks: Run minimal tests like `cargo test` to confirm.
+- Apply cleanup tools: Use `cargo clean` to remove build artifacts if necessary.
+
+### 2. Remove Unused or Redundant Code
+
+- Eliminate unused variables, functions, structs, enums, traits, or code blocks created by the edit.
+- Consolidate redundant elements, such as duplicated logic or unnecessary match arms.
+- Use Rust-specific static analysis tools if available (e.g., clippy via `cargo clippy` to identify issues—do not install new tools).
+- Keep useful comments or documentation; ensure removals do not break functionality.
+
+### 3. File and Folder Cleanup
+
+- Delete empty or unused files and folders after the edit (e.g., orphaned modules or directories).
+- Remove temporary files (e.g., .bak, ~, .DS_Store) or build artifacts (e.g., target/ directory via `cargo clean`).
+- Keep essential files like .git for version control or Cargo.toml unless they are truly redundant.
+
+### 4. General Best Practices for Cleanup
+
+- Reformat code using rustfmt: Run `cargo fmt` to apply consistent formatting.
+- Remove trailing whitespace, extra empty lines, or old commented-out code.
+- Optimize imports: Remove unused imports and sort them if the project style requires it (rustfmt handles this).
+- Run a clean build to validate: Use `cargo build` or `cargo test`.
+- Log cleanup steps in commit messages if committing changes.
+- Limit actions to those related to the edit; suggest changes instead of applying them if unsure.
+
+For major cleanups (e.g., removing dependencies or files), ask the user for confirmation first. Always be careful to prevent disruptions.

@@ -334,18 +334,19 @@ pub enum Libp2pMessage {
 ## Next Steps
 
 1. **Immediate Actions**
-
+   
    - [ ] Create `network-upgrade` feature branch
    - [ ] Set up upstream repository configuration
    - [ ] Begin Phase 1 implementation
 
 2. **This Week**
-
+   
    - [ ] Complete module structure design
    - [ ] Add libp2p dependencies
    - [ ] Start compatibility bridge implementation
 
 3. **Next Week**
+   
    - [ ] Complete compatibility bridge
    - [ ] Begin basic network service implementation
    - [ ] Plan Phase 2 architecture

@@ -1,0 +1,38 @@
+---
+alwaysApply: true
+---
+
+## Core Rule: Reuse Existing Components
+
+When adding features, fixing bugs, or editing code in a Rust project, always try to reuse existing components, functions, modules, crates, or patterns from the codebase or dependencies first. This avoids duplication, keeps things consistent, and follows the DRY (Don't Repeat Yourself) principle.
+
+### 1. Identify Reusable Components
+
+- Look through the codebase for similar functionality (e.g., existing modules, traits, or functions).
+- Check standard library (std::) or dependencies in Cargo.toml (e.g., use vec! macro instead of custom lists).
+- Match project patterns (e.g., error handling with Result, async with tokio if used).
+
+### 2. Evaluation Criteria for Reuse
+
+- Check if the component:
+  - Meets the needs (or can be extended slightly).
+  - Is tested, documented, and efficient.
+  - Avoids adding complexity or using outdated parts.
+- Pick the most flexible option if there are choices.
+
+### 3. Implementation Steps
+
+- Use it directly if it fits (e.g., import and call).
+- Make small refactors for better reuse if needed, without breaking other code.
+- If nothing fits, create new code that is modular and reusable (e.g., in a separate module, with tests).
+- Use tools like grep or IDE search to find candidates.
+
+### 4. General Best Practices for Reuse
+
+- Remove duplicates by pulling out shared code (e.g., into a util module).
+- Check git history for similar past solutions.
+- Prefer crates from dependencies over writing new code.
+- Note reuse in comments or commit messages.
+- Test after integrating to ensure it works.
+
+For big refactors, ask the user to confirm. If reuse is not clear, suggest options to keep code efficient and easy to maintain.

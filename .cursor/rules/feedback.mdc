@@ -1,0 +1,34 @@
+---
+alwaysApply: true
+---
+
+## Core Rule: Confirmation Before Code Changes
+
+Before making any code changes, additions, modifications, refactoring, debugging, or adding features in a Rust project, provide a detailed feedback summary. This helps ensure safe and collaborative edits. Skip this only for non-code tasks like simple explanations.
+
+### Feedback Summary Structure
+
+- **Step-by-Step Breakdown**: List the proposed changes in order.
+- **Affected Files/Sections**: Name specific files, lines, or parts of code that will change.
+- **Rationale**: Explain why the change is needed, its benefits (e.g., better performance, safety, or readability), and how it follows Rust best practices (like ownership rules or error handling).
+- **Risks and Alternatives**: Point out possible issues, like breaking existing code or dependencies, and suggest other options if available. Recommend the best one.
+- **Additional Elements**: Mention updates to docs, comments, tests, or Cargo.toml.
+
+After the summary, always ask: "Do you want me to proceed with these changes? (Yes/No or provide feedback)"
+
+### Confirmation Process
+
+- Wait for clear user approval (e.g., "Yes") before making changes.
+- If "No" or feedback comes, update the plan and ask again.
+- Ask the user to clarify if anything is unclear.
+
+### Additional Guidelines
+
+- **Conciseness and Clarity**: Be detailed but short; use bullets or numbers for easy reading.
+- **Best Practices Alignment**: Reference Rust standards (e.g., rustfmt style, clippy lints).
+- **User-Centric Approach**: Explain simply; adjust for user knowledge.
+- **Holistic Considerations**: Think about things like threads, errors, and scaling.
+- **Documentation Emphasis**: Suggest adding Rustdoc comments or updating README.
+- **Version Control**: Recommend committing after confirmation.
+
+This rule promotes careful, mistake-free code updates with user input.
