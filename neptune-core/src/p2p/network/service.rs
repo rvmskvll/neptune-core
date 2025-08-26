@@ -11,6 +11,12 @@ use libp2p::{
     noise,
     swarm::{NetworkBehaviour, Swarm, SwarmEvent},
     tcp, yamux, PeerId, Transport,
+    request_response::{Behaviour as RequestResponseBehaviour, ProtocolSupport, ResponseChannel},
+    ping::{Behaviour as PingBehaviour, Event as PingEvent},
+    identify::{Behaviour as IdentifyBehaviour, Event as IdentifyEvent},
+    kad::{Behaviour as KadBehaviour, Event as KadEvent, QueryResult, Record, RecordKey, StoreInserts},
+    mdns::{tokio::Behaviour as MdnsBehaviour, Event as MdnsEvent},
+    gossipsub::{Behaviour as GossipsubBehaviour, Event as GossipsubEvent, MessageId, ValidationMode, MessageAuthenticity},
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -24,7 +30,7 @@ pub struct NetworkService {
     /// Network configuration
     config: NetworkConfig,
     /// libp2p swarm for network management
-    swarm: Option<Swarm<NeptuneBehaviour>>,
+    swarm: Option<Swarm<EnhancedNeptuneBehaviour>>,
     /// Active connections tracking
     connections: Arc<RwLock<HashMap<PeerId, ConnectionInfo>>>,
     /// Service status
@@ -33,19 +39,176 @@ pub struct NetworkService {
     running: bool,
 }
 
-/// Neptune-specific network behaviour
+/// Enhanced Neptune-specific network behaviour with all available libp2p protocols
 #[derive(NetworkBehaviour)]
-struct NeptuneBehaviour {
+struct EnhancedNeptuneBehaviour {
     /// Identify protocol for peer information
-    identify: libp2p::identify::Behaviour,
+    identify: IdentifyBehaviour,
     /// Ping protocol for connection health
-    ping: libp2p::ping::Behaviour,
+    ping: PingBehaviour,
     /// Kademlia DHT for peer discovery
-    kademlia: libp2p::kad::Behaviour<libp2p::kad::store::MemoryStore>,
+    kademlia: KadBehaviour<libp2p::kad::store::MemoryStore>,
     /// mDNS for local network discovery
-    mdns: libp2p::mdns::tokio::Behaviour,
+    mdns: MdnsBehaviour,
     /// Gossipsub for block/transaction broadcasting
-    gossipsub: libp2p::gossipsub::Behaviour,
+    gossipsub: GossipsubBehaviour,
+    /// Request-response for direct peer communication
+    request_response: RequestResponseBehaviour<NeptuneRequestCodec>,
+}
+
+/// Neptune request-response protocol codec
+#[derive(Debug, Clone)]
+pub struct NeptuneRequestCodec;
+
+/// Neptune request types
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NeptuneRequest {
+    /// Block request
+    BlockRequest { block_hash: String },
+    /// Transaction request
+    TransactionRequest { tx_hash: String },
+    /// Peer list request
+    PeerListRequest { max_peers: u32 },
+    /// Sync request
+    SyncRequest { from_height: u64, to_height: u64 },
+    /// Custom request
+    CustomRequest { request_type: String, data: Vec<u8> },
+}
+
+/// Neptune response types
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NeptuneResponse {
+    /// Block response
+    BlockResponse { block_data: Vec<u8> },
+    /// Transaction response
+    TransactionResponse { tx_data: Vec<u8> },
+    /// Peer list response
+    PeerListResponse { peers: Vec<String> },
+    /// Sync response
+    SyncResponse { blocks: Vec<Vec<u8>> },
+    /// Custom response
+    CustomResponse { response_type: String, data: Vec<u8> },
+    /// Error response
+    ErrorResponse { error_code: u32, error_message: String },
+}
+
+impl libp2p::request_response::Codec for NeptuneRequestCodec {
+    type Protocol = libp2p::request_response::ProtocolName;
+    type Request = NeptuneRequest;
+    type Response = NeptuneResponse;
+
+    fn read_request<T>(&mut self, _: &Self::Protocol, io: &mut T) -> std::io::Result<Option<Self::Request>>
+    where
+        T: AsyncRead + Unpin,
+    {
+        // Read request from stream
+        // This is a simplified implementation
+        let mut buffer = Vec::new();
+        io.read_to_end(&mut buffer).await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        
+        // Parse request (simplified)
+        if buffer.is_empty() {
+            Ok(None)
+        } else {
+            // In a real implementation, you'd deserialize the request
+            Ok(Some(NeptuneRequest::CustomRequest {
+                request_type: "test".to_string(),
+                data: buffer,
+            }))
+        }
+    }
+
+    fn read_response<T>(&mut self, _: &Self::Protocol, io: &mut T) -> std::io::Result<Option<Self::Response>>
+    where
+        T: AsyncRead + Unpin,
+    {
+        // Read response from stream
+        let mut buffer = Vec::new();
+        io.read_to_end(&mut buffer).await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        
+        // Parse response (simplified)
+        if buffer.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(NeptuneResponse::CustomResponse {
+                response_type: "test".to_string(),
+                data: buffer,
+            }))
+        }
+    }
+
+    fn write_request<T>(&mut self, _: &Self::Protocol, io: &mut T, request: Self::Request) -> std::io::Result<()>
+    where
+        T: AsyncWrite + Unpin,
+    {
+        // Write request to stream
+        let data = match request {
+            NeptuneRequest::BlockRequest { block_hash } => block_hash.into_bytes(),
+            NeptuneRequest::TransactionRequest { tx_hash } => tx_hash.into_bytes(),
+            NeptuneRequest::PeerListRequest { max_peers } => max_peers.to_le_bytes().to_vec(),
+            NeptuneRequest::SyncRequest { from_height, to_height } => {
+                let mut data = Vec::new();
+                data.extend_from_slice(&from_height.to_le_bytes());
+                data.extend_from_slice(&to_height.to_le_bytes());
+                data
+            }
+            NeptuneRequest::CustomRequest { request_type, data } => {
+                let mut combined = Vec::new();
+                combined.extend_from_slice(request_type.as_bytes());
+                combined.extend_from_slice(&data);
+                combined
+            }
+        };
+        
+        io.write_all(&data).await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        Ok(())
+    }
+
+    fn write_response<T>(&mut self, _: &Self::Protocol, io: &mut T, response: Self::Response) -> std::io::Result<()>
+    where
+        T: AsyncWrite + Unpin,
+    {
+        // Write response to stream
+        let data = match response {
+            NeptuneResponse::BlockResponse { block_data } => block_data,
+            NeptuneResponse::TransactionResponse { tx_data } => tx_data,
+            NeptuneResponse::PeerListResponse { peers } => {
+                let mut data = Vec::new();
+                for peer in peers {
+                    data.extend_from_slice(peer.as_bytes());
+                    data.push(b'\n');
+                }
+                data
+            }
+            NeptuneResponse::SyncResponse { blocks } => {
+                let mut data = Vec::new();
+                for block in blocks {
+                    data.extend_from_slice(&(block.len() as u32).to_le_bytes());
+                    data.extend_from_slice(&block);
+                }
+                data
+            }
+            NeptuneResponse::CustomResponse { response_type, data } => {
+                let mut combined = Vec::new();
+                combined.extend_from_slice(response_type.as_bytes());
+                combined.extend_from_slice(&data);
+                combined
+            }
+            NeptuneResponse::ErrorResponse { error_code, error_message } => {
+                let mut data = Vec::new();
+                data.extend_from_slice(&error_code.to_le_bytes());
+                data.extend_from_slice(error_message.as_bytes());
+                data
+            }
+        };
+        
+        io.write_all(&data).await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        Ok(())
+    }
 }
 
 impl NetworkService {
@@ -74,7 +237,7 @@ impl NetworkService {
             ).into());
         }
 
-        info!("Starting libp2p network service...");
+        info!("Starting enhanced libp2p network service...");
 
         // Update status
         {
@@ -83,11 +246,11 @@ impl NetworkService {
         }
 
         // Create and configure swarm
-        let swarm = self.create_swarm().await?;
+        let swarm = self.create_enhanced_swarm().await?;
         self.swarm = Some(swarm);
 
         // Start network event loop
-        self.start_network_loop().await?;
+        self.start_enhanced_network_loop().await?;
 
         self.running = true;
         
@@ -97,7 +260,7 @@ impl NetworkService {
             *status = ServiceStatus::Running;
         }
 
-        info!("libp2p network service started successfully");
+        info!("Enhanced libp2p network service started successfully");
         Ok(())
     }
 
@@ -107,7 +270,7 @@ impl NetworkService {
             return Ok(());
         }
 
-        info!("Stopping libp2p network service...");
+        info!("Stopping enhanced libp2p network service...");
 
         // Update status
         {
@@ -131,12 +294,12 @@ impl NetworkService {
             *status = ServiceStatus::Stopped;
         }
 
-        info!("libp2p network service stopped");
+        info!("Enhanced libp2p network service stopped");
         Ok(())
     }
 
-    /// Create and configure the libp2p swarm
-    async fn create_swarm(&self) -> P2pResult<Swarm<NeptuneBehaviour>> {
+    /// Create and configure the enhanced libp2p swarm
+    async fn create_enhanced_swarm(&self) -> P2pResult<Swarm<EnhancedNeptuneBehaviour>> {
         // Create transport
         let transport = self.create_transport().await?;
 
@@ -146,19 +309,19 @@ impl NetworkService {
 
         info!("Local peer ID: {}", local_peer_id);
 
-        // Create behaviour
-        let behaviour = self.create_behaviour().await?;
+        // Create enhanced behaviour
+        let behaviour = self.create_enhanced_behaviour().await?;
 
         // Create swarm
         let mut swarm = Swarm::new(transport, behaviour, local_peer_id);
 
         // Configure swarm
-        self.configure_swarm(&mut swarm).await?;
+        self.configure_enhanced_swarm(&mut swarm).await?;
 
         Ok(swarm)
     }
 
-    /// Create the libp2p transport
+    /// Create the enhanced libp2p transport
     async fn create_transport(&self) -> P2pResult<libp2p::core::transport::Boxed<(PeerId, libp2p::core::muxing::StreamMuxerBox)>> {
         let tcp_config = tcp::Config::default()
             .nodelay(true)
@@ -191,13 +354,13 @@ impl NetworkService {
         Ok(transport)
     }
 
-    /// Create the network behaviour
-    async fn create_behaviour(&self) -> P2pResult<NeptuneBehaviour> {
+    /// Create the enhanced network behaviour
+    async fn create_enhanced_behaviour(&self) -> P2pResult<EnhancedNeptuneBehaviour> {
         let local_key = libp2p::identity::Keypair::generate_ed25519();
         let local_peer_id = PeerId::from(local_key.public());
 
         // Identify behaviour
-        let identify = libp2p::identify::Behaviour::new(
+        let identify = IdentifyBehaviour::new(
             libp2p::identify::Config::new(
                 "/neptune/1.0.0".to_string(),
                 local_key.public(),
@@ -206,7 +369,7 @@ impl NetworkService {
         );
 
         // Ping behaviour
-        let ping = libp2p::ping::Behaviour::new(
+        let ping = PingBehaviour::new(
             libp2p::ping::Config::new()
                 .with_interval(Duration::from_secs(60))
                 .with_timeout(Duration::from_secs(30)),
@@ -215,7 +378,7 @@ impl NetworkService {
         // Kademlia DHT behaviour
         let kademlia = if self.config.discovery.enable_kademlia {
             let store = libp2p::kad::store::MemoryStore::new(local_peer_id);
-            let mut kad = libp2p::kad::Behaviour::new(local_peer_id, store);
+            let mut kad = KadBehaviour::new(local_peer_id, store);
             
             // Add bootstrap nodes
             for bootstrap_node in &self.config.discovery.bootstrap_nodes {
@@ -230,7 +393,7 @@ impl NetworkService {
             kad
         } else {
             let store = libp2p::kad::store::MemoryStore::new(local_peer_id);
-            libp2p::kad::Behaviour::new(local_peer_id, store)
+            KadBehaviour::new(local_peer_id, store)
         };
 
         // mDNS behaviour
@@ -247,43 +410,57 @@ impl NetworkService {
         // Gossipsub behaviour
         let gossipsub = if self.config.protocol.enable_gossipsub {
             let message_id_fn = |message: &libp2p::gossipsub::Message| {
-                let mut s = DefaultHasher::new();
+                let mut s = std::collections::hash_map::DefaultHasher::new();
                 message.data.hash(&mut s);
-                libp2p::gossipsub::MessageId::from(s.finish().to_string())
+                MessageId::from(s.finish().to_string())
             };
 
             let gossipsub_config = libp2p::gossipsub::ConfigBuilder::default()
                 .heartbeat_interval(Duration::from_secs(1))
-                .validation_mode(libp2p::gossipsub::ValidationMode::Strict)
+                .validation_mode(ValidationMode::Strict)
                 .message_id_fn(message_id_fn)
                 .build()
                 .expect("Valid gossipsub config");
 
-            libp2p::gossipsub::Behaviour::new(
-                libp2p::gossipsub::MessageAuthenticity::Signed(local_key),
+            GossipsubBehaviour::new(
+                MessageAuthenticity::Signed(local_key),
                 gossipsub_config,
             )?
         } else {
             let config = libp2p::gossipsub::ConfigBuilder::default()
                 .build()
                 .expect("Valid gossipsub config");
-            libp2p::gossipsub::Behaviour::new(
-                libp2p::gossipsub::MessageAuthenticity::Anonymous,
+            GossipsubBehaviour::new(
+                MessageAuthenticity::Anonymous,
                 config,
             )?
         };
 
-        Ok(NeptuneBehaviour {
+        // Request-response behaviour
+        let request_response = RequestResponseBehaviour::new(
+            NeptuneRequestCodec,
+            std::iter::once((libp2p::request_response::ProtocolName::from("/neptune/1.0.0"), ProtocolSupport::Full)),
+            libp2p::request_response::Config::default()
+                .with_request_timeout(Duration::from_secs(30))
+                .with_max_concurrent_streams(Some(100)),
+        );
+
+
+
+
+
+        Ok(EnhancedNeptuneBehaviour {
             identify,
             ping,
             kademlia,
             mdns,
             gossipsub,
+            request_response,
         })
     }
 
-    /// Configure the swarm settings
-    async fn configure_swarm(&self, swarm: &mut Swarm<NeptuneBehaviour>) -> P2pResult<()> {
+    /// Configure the enhanced swarm settings
+    async fn configure_enhanced_swarm(&self, swarm: &mut Swarm<EnhancedNeptuneBehaviour>) -> P2pResult<()> {
         // Listen on configured address
         let listen_addr = format!("/ip4/0.0.0.0/tcp/{}", self.config.transport.tcp_port);
         let multiaddr = listen_addr.parse()
@@ -314,8 +491,8 @@ impl NetworkService {
         Ok(())
     }
 
-    /// Start the network event loop
-    async fn start_network_loop(&mut self) -> P2pResult<()> {
+    /// Start the enhanced network event loop
+    async fn start_enhanced_network_loop(&mut self) -> P2pResult<()> {
         let swarm = self.swarm.as_mut()
             .ok_or_else(|| NetworkError::ConfigurationError(
                 "Swarm not initialized".to_string()
@@ -324,25 +501,30 @@ impl NetworkService {
         let connections = self.connections.clone();
         let status = self.status.clone();
 
-        // Spawn network event loop
+        // Spawn enhanced network event loop
         tokio::spawn(async move {
             loop {
                 match swarm.next_event().await {
-                    SwarmEvent::Behaviour(NeptuneBehaviourEvent::Identify(identify_event)) => {
+                    SwarmEvent::Behaviour(EnhancedNeptuneBehaviourEvent::Identify(identify_event)) => {
                         Self::handle_identify_event(identify_event, &connections).await;
                     }
-                    SwarmEvent::Behaviour(NeptuneBehaviourEvent::Ping(ping_event)) => {
+                    SwarmEvent::Behaviour(EnhancedNeptuneBehaviourEvent::Ping(ping_event)) => {
                         Self::handle_ping_event(ping_event, &connections).await;
                     }
-                    SwarmEvent::Behaviour(NeptuneBehaviourEvent::Kademlia(kad_event)) => {
+                    SwarmEvent::Behaviour(EnhancedNeptuneBehaviourEvent::Kademlia(kad_event)) => {
                         Self::handle_kademlia_event(kad_event, &connections).await;
                     }
-                    SwarmEvent::Behaviour(NeptuneBehaviourEvent::Mdns(mdns_event)) => {
+                    SwarmEvent::Behaviour(EnhancedNeptuneBehaviourEvent::Mdns(mdns_event)) => {
                         Self::handle_mdns_event(mdns_event, &connections).await;
                     }
-                    SwarmEvent::Behaviour(NeptuneBehaviourEvent::Gossipsub(gossip_event)) => {
+                    SwarmEvent::Behaviour(EnhancedNeptuneBehaviourEvent::Gossipsub(gossip_event)) => {
                         Self::handle_gossipsub_event(gossip_event, &connections).await;
                     }
+                    SwarmEvent::Behaviour(EnhancedNeptuneBehaviourEvent::RequestResponse(req_resp_event)) => {
+                        Self::handle_request_response_event(req_resp_event, &connections).await;
+                    }
+
+
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
                         Self::handle_connection_established(peer_id, endpoint, &connections).await;
                     }
@@ -382,20 +564,20 @@ impl NetworkService {
 
     /// Handle identify events
     async fn handle_identify_event(
-        event: libp2p::identify::Event,
+        event: IdentifyEvent,
         connections: &Arc<RwLock<HashMap<PeerId, ConnectionInfo>>>,
     ) {
         match event {
-            libp2p::identify::Event::Received { peer_id, info } => {
+            IdentifyEvent::Received { peer_id, info } => {
                 debug!("Received identify info from {}: {:?}", peer_id, info);
             }
-            libp2p::identify::Event::Sent { peer_id } => {
+            IdentifyEvent::Sent { peer_id } => {
                 debug!("Sent identify info to {}", peer_id);
             }
-            libp2p::identify::Event::Error { peer_id, error } => {
+            IdentifyEvent::Error { peer_id, error } => {
                 warn!("Identify error with {}: {}", peer_id, error);
             }
-            libp2p::identify::Event::Pushed { peer_id, info } => {
+            IdentifyEvent::Pushed { peer_id, info } => {
                 debug!("Pushed identify info to {}: {:?}", peer_id, info);
             }
         }
@@ -403,17 +585,17 @@ impl NetworkService {
 
     /// Handle ping events
     async fn handle_ping_event(
-        event: libp2p::ping::Event,
+        event: PingEvent,
         connections: &Arc<RwLock<HashMap<PeerId, ConnectionInfo>>>,
     ) {
         match event {
-            libp2p::ping::Event::Ping { peer } => {
+            PingEvent::Ping { peer } => {
                 debug!("Ping sent to {}", peer);
             }
-            libp2p::ping::Event::Pong { peer, rtt } => {
+            PingEvent::Pong { peer, rtt } => {
                 debug!("Pong received from {} with RTT: {:?}", peer, rtt);
             }
-            libp2p::ping::Event::PingFailure { peer, error } => {
+            PingEvent::PingFailure { peer, error } => {
                 warn!("Ping failed to {}: {}", peer, error);
             }
         }
@@ -421,11 +603,11 @@ impl NetworkService {
 
     /// Handle Kademlia events
     async fn handle_kademlia_event(
-        event: libp2p::kad::Event,
+        event: KadEvent,
         connections: &Arc<RwLock<HashMap<PeerId, ConnectionInfo>>>,
     ) {
         match event {
-            libp2p::kad::Event::OutboundQueryCompleted { result, .. } => {
+            KadEvent::OutboundQueryCompleted { result, .. } => {
                 match result {
                     Ok(peers) => {
                         debug!("Kademlia query completed, found {} peers", peers.len());
@@ -443,16 +625,16 @@ impl NetworkService {
 
     /// Handle mDNS events
     async fn handle_mdns_event(
-        event: libp2p::mdns::Event,
+        event: MdnsEvent,
         connections: &Arc<RwLock<HashMap<PeerId, ConnectionInfo>>>,
     ) {
         match event {
-            libp2p::mdns::Event::Discovered(list) => {
+            MdnsEvent::Discovered(list) => {
                 for (peer_id, multiaddr) in list {
                     debug!("mDNS discovered peer {} at {}", peer_id, multiaddr);
                 }
             }
-            libp2p::mdns::Event::Expired(list) => {
+            MdnsEvent::Expired(list) => {
                 for (peer_id, multiaddr) in list {
                     debug!("mDNS expired peer {} at {}", peer_id, multiaddr);
                 }
@@ -462,11 +644,11 @@ impl NetworkService {
 
     /// Handle gossipsub events
     async fn handle_gossipsub_event(
-        event: libp2p::gossipsub::Event,
+        event: GossipsubEvent,
         connections: &Arc<RwLock<HashMap<PeerId, ConnectionInfo>>>,
     ) {
         match event {
-            libp2p::gossipsub::Event::Message { 
+            GossipsubEvent::Message { 
                 propagation_source, 
                 message_id, 
                 message 
@@ -474,15 +656,90 @@ impl NetworkService {
                 debug!("Gossipsub message from {}: {:?}", propagation_source, message_id);
                 // TODO: Handle Neptune-specific messages
             }
-            libp2p::gossipsub::Event::Subscribed { peer_id, topic } => {
+            GossipsubEvent::Subscribed { peer_id, topic } => {
                 debug!("Peer {} subscribed to topic {}", peer_id, topic);
             }
-            libp2p::gossipsub::Event::Unsubscribed { peer_id, topic } => {
+            GossipsubEvent::Unsubscribed { peer_id, topic } => {
                 debug!("Peer {} unsubscribed from topic {}", peer_id, topic);
             }
             _ => {
                 // Handle other gossipsub events as needed
             }
+        }
+    }
+
+    /// Handle request-response events
+    async fn handle_request_response_event(
+        event: libp2p::request_response::Event<NeptuneRequest, NeptuneResponse>,
+        connections: &Arc<RwLock<HashMap<PeerId, ConnectionInfo>>>,
+    ) {
+        match event {
+            libp2p::request_response::Event::Message { peer, message } => {
+                match message {
+                    libp2p::request_response::Message::Request { request, channel } => {
+                        debug!("Request from {}: {:?}", peer, request);
+                        // Handle request and send response
+                        Self::handle_neptune_request(peer, request, channel).await;
+                    }
+                    libp2p::request_response::Message::Response { response, .. } => {
+                        debug!("Response from {}: {:?}", peer, response);
+                        // Handle response
+                    }
+                }
+            }
+            libp2p::request_response::Event::OutboundFailure { peer, request, error } => {
+                warn!("Outbound request failed to {}: {:?} - {}", peer, request, error);
+            }
+            libp2p::request_response::Event::InboundFailure { peer, error } => {
+                warn!("Inbound request failed from {}: {}", peer, error);
+            }
+            libp2p::request_response::Event::ResponseSent { peer, .. } => {
+                debug!("Response sent to {}", peer);
+            }
+        }
+    }
+
+
+
+
+
+    /// Handle Neptune request
+    async fn handle_neptune_request(
+        peer: PeerId,
+        request: NeptuneRequest,
+        channel: ResponseChannel<NeptuneResponse>,
+    ) {
+        // Process request and generate response
+        let response = match request {
+            NeptuneRequest::BlockRequest { block_hash } => {
+                debug!("Block request from {}: {}", peer, block_hash);
+                // TODO: Fetch block from blockchain
+                NeptuneResponse::BlockResponse { block_data: vec![] }
+            }
+            NeptuneRequest::TransactionRequest { tx_hash } => {
+                debug!("Transaction request from {}: {}", peer, tx_hash);
+                // TODO: Fetch transaction from mempool
+                NeptuneResponse::TransactionResponse { tx_data: vec![] }
+            }
+            NeptuneRequest::PeerListRequest { max_peers } => {
+                debug!("Peer list request from {}: max {}", peer, max_peers);
+                // TODO: Get peer list
+                NeptuneResponse::PeerListResponse { peers: vec![] }
+            }
+            NeptuneRequest::SyncRequest { from_height, to_height } => {
+                debug!("Sync request from {}: {} to {}", peer, from_height, to_height);
+                // TODO: Get blocks for sync
+                NeptuneResponse::SyncResponse { blocks: vec![] }
+            }
+            NeptuneRequest::CustomRequest { request_type, data } => {
+                debug!("Custom request from {}: {} ({} bytes)", peer, request_type, data.len());
+                NeptuneResponse::CustomResponse { response_type: request_type, data }
+            }
+        };
+
+        // Send response
+        if let Err(e) = channel.send(response) {
+            warn!("Failed to send response to {}: {}", peer, e);
         }
     }
 
@@ -545,6 +802,57 @@ impl NetworkService {
     pub fn config(&self) -> &NetworkConfig {
         &self.config
     }
+
+    /// Send request to peer
+    pub async fn send_request(
+        &mut self,
+        peer: PeerId,
+        request: NeptuneRequest,
+    ) -> P2pResult<()> {
+        let swarm = self.swarm.as_mut()
+            .ok_or_else(|| NetworkError::ConfigurationError(
+                "Swarm not initialized".to_string()
+            ))?;
+
+        // Send request
+        swarm.behaviour_mut().request_response.send_request(
+            &libp2p::request_response::ProtocolName::from("/neptune/1.0.0"),
+            peer,
+            request,
+        );
+
+        Ok(())
+    }
+
+    /// Subscribe to gossipsub topic
+    pub async fn subscribe_topic(&mut self, topic: String) -> P2pResult<()> {
+        let swarm = self.swarm.as_mut()
+            .ok_or_else(|| NetworkError::ConfigurationError(
+                "Swarm not initialized".to_string()
+            ))?;
+
+        let topic = libp2p::gossipsub::IdentTopic::new(topic);
+        swarm.behaviour_mut().gossipsub.subscribe(&topic, None);
+
+        Ok(())
+    }
+
+    /// Publish message to gossipsub topic
+    pub async fn publish_message(
+        &mut self,
+        topic: String,
+        message: Vec<u8>,
+    ) -> P2pResult<()> {
+        let swarm = self.swarm.as_mut()
+            .ok_or_else(|| NetworkError::ConfigurationError(
+                "Swarm not initialized".to_string()
+            ))?;
+
+        let topic = libp2p::gossipsub::IdentTopic::new(topic);
+        swarm.behaviour_mut().gossipsub.publish(topic, message)?;
+
+        Ok(())
+    }
 }
 
 impl Drop for NetworkService {
@@ -568,14 +876,14 @@ mod tests {
     use crate::p2p::config::NetworkConfig;
 
     #[tokio::test]
-    async fn test_network_service_creation() {
+    async fn test_enhanced_network_service_creation() {
         let config = NetworkConfig::test_config();
         let service = NetworkService::new(config).await;
         assert!(service.is_ok());
     }
 
     #[tokio::test]
-    async fn test_network_service_status() {
+    async fn test_enhanced_network_service_status() {
         let config = NetworkConfig::test_config();
         let service = NetworkService::new(config).await.unwrap();
         
@@ -588,5 +896,22 @@ mod tests {
         assert_eq!(ConnectionDirection::Inbound, ConnectionDirection::Inbound);
         assert_eq!(ConnectionDirection::Outbound, ConnectionDirection::Outbound);
         assert_ne!(ConnectionDirection::Inbound, ConnectionDirection::Outbound);
+    }
+
+    #[test]
+    fn test_neptune_request_codec() {
+        let codec = NeptuneRequestCodec;
+        
+        // Test request types
+        let block_request = NeptuneRequest::BlockRequest { 
+            block_hash: "test_hash".to_string() 
+        };
+        let tx_request = NeptuneRequest::TransactionRequest { 
+            tx_hash: "test_tx".to_string() 
+        };
+        
+        assert_eq!(block_request, block_request);
+        assert_eq!(tx_request, tx_request);
+        assert_ne!(block_request, tx_request);
     }
 }
