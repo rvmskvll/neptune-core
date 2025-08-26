@@ -1,430 +1,465 @@
-# Neptune Core P2P System Architecture
+# Neptune Core P2P System - Complete Architecture Diagrams
 
-This document contains the Mermaid diagram showing our new P2P system architecture and how it integrates with the legacy network via our compatibility bridge.
+## 🏗️ **System Architecture Overview**
 
-## System Architecture Overview
+This document provides comprehensive Mermaid diagrams showing the complete Neptune Core P2P system architecture, including the integration layer that connects the new P2P system to the main application.
+
+## 🔄 **Complete System Architecture**
 
 ```mermaid
 graph TB
-    %% Application Layer
     subgraph "Application Layer"
-        ML[Main Loop]
-        MLM[Mining Loop]
-        RPC[RPC Server]
-        BC[Blockchain]
-        MP[Mempool]
+        A[Neptune Core Main] --> B[Blockchain Engine]
+        A --> C[Wallet Manager]
+        A --> D[RPC Server]
+        A --> E[Mining Engine]
+        A --> F[State Manager]
     end
 
-    %% New P2P Layer
-    subgraph "New P2P Layer (libp2p)"
-        NS[NetworkService]
-        TS[TransportService]
-        DS[DiscoveryService]
-        PH[ProtocolHandler]
-        MC[MessageCodec]
+    subgraph "P2P Integration Layer"
+        G[P2pIntegrationService] --> H[Protocol Handler]
+        G --> I[Message Codec]
+        G --> J[Network Router]
+        G --> K[Status Monitor]
     end
 
-    %% libp2p Protocols
-    subgraph "libp2p Protocols"
-        ID[Identify]
-        PG[Ping]
-        KD[Kademlia DHT]
-        MD[mDNS]
-        GS[Gossipsub]
-        RR[Request-Response]
+    subgraph "Legacy Compatibility Bridge"
+        L[LegacyBridge] --> M[LegacyNetworkService]
+        L --> N[MessageAdapter]
+        L --> O[MigrationManager]
     end
 
-    %% Compatibility Bridge
-    subgraph "Compatibility Bridge"
-        LB[LegacyBridge]
-        MA[MessageAdapter]
-        LNS[LegacyNetworkService]
-        MM[MigrationManager]
+    subgraph "New P2P System"
+        P[NetworkService] --> Q[TransportService]
+        P --> R[DiscoveryService]
+        P --> S[Enhanced Protocols]
     end
 
-    %% Legacy Network
-    subgraph "Legacy Network (TCP)"
-        LML[Legacy Main Loop]
-        LPL[Legacy Peer Loop]
-        LCL[Legacy Connection Logic]
-        LPM[Legacy PeerMessage]
-    end
-
-    %% Network Transport
     subgraph "Network Transport"
-        TCP[TCP]
-        NO[Noise Encryption]
-        YM[Yamux Multiplexing]
+        T[TCP Legacy] --> U[Legacy Peers]
+        V[libp2p Transport] --> W[libp2p Peers]
     end
 
-    %% Peer Network
-    subgraph "Peer Network"
-        P1[Peer 1]
-        P2[Peer 2]
-        P3[Peer 3]
-        P4[Peer 4]
-    end
+    %% Application to Integration connections
+    A --> G
+    B --> G
+    C --> G
+    D --> G
+    E --> G
+    F --> G
 
-    %% Application Layer Connections
-    ML --> NS
-    MLM --> NS
-    RPC --> NS
-    BC --> NS
-    MP --> NS
+    %% Integration to Bridge connections
+    G --> L
 
-    %% P2P Layer Internal
-    NS --> TS
-    NS --> DS
-    NS --> PH
-    PH --> MC
+    %% Integration to New P2P connections
+    G --> P
 
-    %% Protocol Connections
-    NS --> ID
-    NS --> PG
-    NS --> KD
-    NS --> MD
-    NS --> GS
-    NS --> RR
+    %% Bridge to Legacy connections
+    M --> T
 
-    %% Transport Layer
-    TS --> TCP
-    TS --> NO
-    TS --> YM
+    %% New P2P to Transport connections
+    Q --> V
+    R --> V
+    S --> V
 
-    %% Compatibility Bridge Connections
-    NS --> LB
-    LB --> MA
-    LB --> LNS
-    LB --> MM
+    %% Message flow
+    X[Application Messages] --> G
+    G --> Y[Network Events]
+    Y --> A
 
-    %% Legacy Network Integration
-    LNS --> LML
-    LNS --> LPL
-    LNS --> LCL
-    MA --> LPM
-
-    %% Network to Peers
-    TCP --> P1
-    TCP --> P2
-    TCP --> P3
-    TCP --> P4
-
-    %% Peer Discovery
-    KD --> P1
-    KD --> P2
-    KD --> P3
-    KD --> P4
-    MD --> P1
-    MD --> P2
-    MD --> P3
-    MD --> P4
-
-    %% Message Flow
-    GS --> P1
-    GS --> P2
-    GS --> P3
-    GS --> P4
-    RR --> P1
-    RR --> P2
-    RR --> P3
-    RR --> P4
-
-    %% Styling
-    classDef appLayer fill:#e1f5fe,stroke:#01579b,stroke-width:2px
-    classDef p2pLayer fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
-    classDef protocols fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
-    classDef bridge fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    classDef legacy fill:#ffebee,stroke:#c62828,stroke-width:2px
-    classDef transport fill:#f1f8e9,stroke:#33691e,stroke-width:2px
-    classDef peers fill:#fce4ec,stroke:#880e4f,stroke-width:2px
-
-    class ML,MLM,RPC,BC,MP appLayer
-    class NS,TS,DS,PH,MC p2pLayer
-    class ID,PG,KD,MD,GS,RR protocols
-    class LB,MA,LNS,MM bridge
-    class LML,LPL,LCL,LPM legacy
-    class TCP,NO,YM transport
-    class P1,P2,P3,P4 peers
+    %% Status and monitoring
+    G --> Z[Health Dashboard]
+    L --> Z
+    P --> Z
 ```
 
-## Detailed Component Relationships
+## 🔌 **Detailed Component Relationships**
 
 ```mermaid
 flowchart TD
-    %% Main Application Flow
-    subgraph "Application Flow"
-        direction TB
-        A[Application Request] --> B{Network Mode?}
-        B -->|Legacy| C[Legacy Bridge]
-        B -->|Libp2p| D[New P2P Layer]
-        B -->|Compatibility| E[Dual Mode]
+    subgraph "Application Integration"
+        A[Main Application] --> B[P2pIntegrationService]
+        B --> C[Message Channels]
+        B --> D[Service Management]
+        B --> E[Health Monitoring]
     end
 
-    %% Legacy Bridge Flow
-    subgraph "Legacy Bridge Flow"
-        direction TB
-        C --> F[MessageAdapter]
-        F --> G[Convert Legacy to Internal]
-        G --> H[Route to New P2P]
-        F --> I[Convert Internal to Legacy]
-        I --> J[Route to Legacy Network]
+    subgraph "Network Routing"
+        F[Message Router] --> G{Message Type}
+        G -->|Legacy Protocol| H[Legacy Bridge]
+        G -->|New Protocol| I[libp2p Network]
+        G -->|Hybrid| J[Both Networks]
     end
 
-    %% New P2P Flow
-    subgraph "New P2P Flow"
-        direction TB
-        D --> K[ProtocolHandler]
-        K --> L[MessageCodec]
-        L --> M[NetworkService]
-        M --> N[libp2p Swarm]
-        N --> O[Transport Layer]
-        O --> P[Peer Network]
+    subgraph "Legacy System"
+        H --> K[TCP Listener]
+        H --> L[Connection Manager]
+        H --> M[Message Handler]
+        H --> N[Protocol Translator]
     end
 
-    %% Dual Mode Flow
-    subgraph "Dual Mode Flow"
-        direction TB
-        E --> Q[MessageRouter]
-        Q --> R{Message Type?}
-        R -->|Block/Transaction| S[New P2P]
-        R -->|Handshake/Sync| T[Legacy]
-        R -->|Hybrid| U[Both Networks]
+    subgraph "New P2P System"
+        I --> O[Swarm Manager]
+        I --> P[Protocol Stack]
+        I --> Q[Discovery Engine]
+        I --> R[Transport Layer]
     end
 
-    %% Migration Flow
-    subgraph "Migration Flow"
-        direction TB
-        V[MigrationManager] --> W{Phase?}
-        W -->|Phase 1| X[Foundation]
-        W -->|Phase 2| Y[Core Implementation]
-        W -->|Phase 3| Z[Integration]
-        W -->|Phase 4| AA[Testing]
-        W -->|Phase 5| BB[Legacy Removal]
+    subgraph "Protocol Translation"
+        S[MessageAdapter] --> T[Legacy ↔ Internal]
+        S --> U[Internal ↔ libp2p]
+        S --> V[Protocol Validation]
     end
 
-    %% Styling
-    classDef app fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    classDef bridge fill:#fff8e1,stroke:#f57c00,stroke-width:2px
-    classDef p2p fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    classDef dual fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
-    classDef migration fill:#fce4ec,stroke:#c2185b,stroke-width:2px
-
-    class A,B,C,D,E app
-    class F,G,H,I,J bridge
-    class K,L,M,N,O,P p2p
-    class Q,R,S,T,U dual
-    class V,W,X,Y,Z,AA,BB migration
+    subgraph "Migration Control"
+        W[MigrationManager] --> X[Phase Control]
+        W --> Y[Progress Tracking]
+        W --> Z[Peer Migration]
+    end
 ```
 
-## Message Flow Architecture
+## 🔄 **Message Flow Architecture**
 
 ```mermaid
 sequenceDiagram
-    participant App as Application
-    participant PH as ProtocolHandler
-    participant MC as MessageCodec
-    participant NS as NetworkService
-    participant LB as LegacyBridge
-    participant LN as LegacyNetwork
-    participant Peer as Peer Node
+    participant App as Application Layer
+    participant Int as P2P Integration
+    participant Bridge as Legacy Bridge
+    participant NewP2P as New P2P System
+    participant Legacy as Legacy Peers
+    participant LibP2P as libp2p Peers
 
-    %% New P2P Message Flow
-    App->>PH: Create ProtocolMessage
-    PH->>MC: Encode Message
-    MC->>NS: Send Encoded Message
-    NS->>Peer: Send via libp2p
+    Note over App,LibP2P: Block Broadcast Flow
 
-    %% Legacy Message Flow
-    App->>LB: Create Legacy Message
-    LB->>LN: Send via TCP
-    LN->>Peer: Send via Legacy Protocol
+    App->>Int: BroadcastBlock(block_data, hash)
+    Int->>Bridge: Route to Legacy Network
+    Int->>NewP2P: Route to libp2p Network
 
-    %% Hybrid Message Flow
-    App->>PH: Create Hybrid Message
-    PH->>LB: Route to Both Networks
-    LB->>LN: Send to Legacy
-    PH->>NS: Send to New P2P
-    NS->>Peer: Send via libp2p
-    LN->>Peer: Send via Legacy
+    Bridge->>Legacy: Send Block Message
+    NewP2P->>LibP2P: Publish to Gossipsub
 
-    %% Response Flow
-    Peer->>NS: Response via libp2p
-    NS->>MC: Decode Response
-    MC->>PH: Process Response
-    PH->>App: Deliver Response
+    Legacy-->>Bridge: Block Received
+    LibP2P-->>NewP2P: Block Received
 
-    Peer->>LN: Response via Legacy
-    LN->>LB: Process Legacy Response
-    LB->>App: Deliver Legacy Response
+    Bridge->>Int: BlockReceived Event
+    NewP2P->>Int: BlockReceived Event
+
+    Int->>App: BlockReceived Event
+
+    Note over App,LibP2P: Peer Discovery Flow
+
+    App->>Int: GetPeerList(max_peers)
+    Int->>Bridge: Get Legacy Peers
+    Int->>NewP2P: Get libp2p Peers
+
+    Bridge-->>Int: Legacy Peer List
+    NewP2P-->>Int: libp2p Peer List
+
+    Int->>App: PeerListUpdate Event
+
+    Note over App,LibP2P: Network Health Check
+
+    App->>Int: GetNetworkStatus
+    Int->>Bridge: Check Legacy Health
+    Int->>NewP2P: Check libp2p Health
+
+    Bridge-->>Int: Legacy Status
+    NewP2P-->>Int: libp2p Status
+
+    Int->>App: NetworkStatusUpdate Event
 ```
 
-## Network Topology
-
-```mermaid
-graph LR
-    %% Neptune Node
-    subgraph "Neptune Core Node"
-        NC[Neptune Core]
-        NS[Network Service]
-        LB[Legacy Bridge]
-    end
-
-    %% Network Connections
-    subgraph "Network Connections"
-        direction TB
-        TCP[TCP Connections]
-        UDP[UDP Discovery]
-        RELAY[Circuit Relay]
-    end
-
-    %% Peer Types
-    subgraph "Peer Types"
-        direction TB
-        LP[Legacy Peers<br/>TCP Only]
-        NP[New Peers<br/>libp2p Only]
-        HP[Hybrid Peers<br/>Both Protocols]
-    end
-
-    %% Discovery Methods
-    subgraph "Discovery Methods"
-        direction TB
-        KD[Kademlia DHT]
-        MD[mDNS Local]
-        BOOT[Bootstrap Nodes]
-        MAN[Manual Entry]
-    end
-
-    %% Connection Flow
-    NC --> NS
-    NC --> LB
-    NS --> TCP
-    NS --> UDP
-    LB --> TCP
-    TCP --> LP
-    TCP --> NP
-    TCP --> HP
-    UDP --> KD
-    UDP --> MD
-    UDP --> BOOT
-    UDP --> MAN
-
-    %% Styling
-    classDef node fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    classDef network fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    classDef peers fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
-    classDef discovery fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-
-    class NC,NS,LB node
-    class TCP,UDP,RELAY network
-    class LP,NP,HP peers
-    class KD,MD,BOOT,MAN discovery
-```
-
-## Protocol Stack
+## 🌐 **Network Topology Integration**
 
 ```mermaid
 graph TB
-    %% Application Layer
-    subgraph "Application Layer"
-        APP[Neptune Application]
-        PROTO[Protocol Handler]
-        CODEC[Message Codec]
+    subgraph "Neptune Core Node"
+        A[Main Application] --> B[P2P Integration]
+        B --> C[Legacy Bridge]
+        B --> D[New P2P System]
     end
 
-    %% libp2p Layer
-    subgraph "libp2p Layer"
-        SWARM[Swarm]
-        ID[Identify]
-        PG[Ping]
-        KD[Kademlia]
-        MD[mDNS]
-        GS[Gossipsub]
-        RR[Request-Response]
+    subgraph "Legacy Network"
+        C --> E[Legacy Peer 1<br/>51.15.139.238:9798]
+        C --> F[Legacy Peer 2<br/>139.162.193.206:9798]
+        C --> G[Legacy Peer N<br/>...]
     end
 
-    %% Transport Layer
-    subgraph "Transport Layer"
-        TCP[TCP]
-        NOISE[Noise]
-        YAMUX[Yamux]
+    subgraph "New P2P Network"
+        D --> H[libp2p Peer 1]
+        D --> I[libp2p Peer 2]
+        D --> J[libp2p Peer N]
+        D --> K[DHT Network]
+        D --> L[mDNS Network]
     end
 
-    %% Network Layer
-    subgraph "Network Layer"
-        IP[IP]
-        ETH[Ethernet]
+    subgraph "Discovery Methods"
+        K --> M[Kademlia DHT]
+        L --> N[Local Network]
+        D --> O[Rendezvous]
+        D --> P[AutoNAT]
     end
 
-    %% Legacy Compatibility
-    subgraph "Legacy Compatibility"
-        LB[Legacy Bridge]
-        LPM[Legacy PeerMessage]
-        LTCP[Legacy TCP]
+    subgraph "Transport Methods"
+        C --> Q[TCP Legacy]
+        D --> R[TCP + Noise + Yamux]
+        D --> S[Circuit Relay]
+        D --> T[DCUtR]
     end
 
-    %% Stack Connections
-    APP --> PROTO
-    PROTO --> CODEC
-    CODEC --> SWARM
-    SWARM --> ID
-    SWARM --> PG
-    SWARM --> KD
-    SWARM --> MD
-    SWARM --> GS
-    SWARM --> RR
-    SWARM --> TCP
-    TCP --> NOISE
-    NOISE --> YAMUX
-    YAMUX --> IP
-    IP --> ETH
-
-    %% Legacy Path
-    APP --> LB
-    LB --> LPM
-    LPM --> LTCP
-    LTCP --> IP
-
-    %% Styling
-    classDef app fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    classDef p2p fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    classDef transport fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
-    classDef network fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-    classDef legacy fill:#ffebee,stroke:#c62828,stroke-width:2px
-
-    class APP,PROTO,CODEC app
-    class SWARM,ID,PG,KD,MD,GS,RR p2p
-    class TCP,NOISE,YAMUX transport
-    class IP,ETH network
-    class LB,LPM,LTCP legacy
+    subgraph "Integration Features"
+        B --> U[Message Routing]
+        B --> V[Protocol Translation]
+        B --> W[Health Monitoring]
+        B --> X[Migration Control]
+    end
 ```
 
-## Key Features and Benefits
+## ⚙️ **Configuration and Mode Management**
+
+```mermaid
+graph TB
+    subgraph "Network Configuration"
+        A[NetworkConfig] --> B[NetworkMode]
+        A --> C[TransportConfig]
+        A --> D[DiscoveryConfig]
+        A --> E[ProtocolConfig]
+        A --> F[LegacyConfig]
+    end
+
+    subgraph "Mode Options"
+        B --> G[LegacyOnly]
+        B --> H[Libp2pOnly]
+        B --> I[Compatibility]
+    end
+
+    subgraph "Service Selection"
+        G --> J[Legacy Bridge Only]
+        H --> K[New P2P Only]
+        I --> L[Both Systems]
+    end
+
+    subgraph "Integration Control"
+        J --> M[Legacy Integration]
+        K --> N[New P2P Integration]
+        L --> O[Dual Integration]
+    end
+
+    subgraph "Runtime Behavior"
+        M --> P[TCP Legacy Only]
+        N --> Q[libp2p Only]
+        O --> R[Hybrid Operation]
+    end
+```
+
+## 🔧 **Service Lifecycle and State Management**
+
+```mermaid
+stateDiagram-v2
+    [*] --> Initialized
+    Initialized --> Starting
+    Starting --> Running
+    Running --> Stopping
+    Stopping --> Stopped
+    Stopped --> [*]
+
+    Running --> Error
+    Error --> Starting
+    Error --> Stopping
+
+    state Running {
+        [*] --> LegacyActive
+        [*] --> LibP2PActive
+        [*] --> BothActive
+
+        LegacyActive --> BothActive
+        LibP2PActive --> BothActive
+        BothActive --> LegacyActive
+        BothActive --> LibP2PActive
+    }
+
+    state LegacyActive {
+        [*] --> TCPListening
+        TCPListening --> PeerConnected
+        PeerConnected --> MessageHandling
+        MessageHandling --> PeerConnected
+    }
+
+    state LibP2PActive {
+        [*] --> SwarmRunning
+        SwarmRunning --> DHTBootstrap
+        DHTBootstrap --> PeerDiscovery
+        PeerDiscovery --> MessageRouting
+    }
+```
+
+## 📊 **Health Monitoring and Metrics**
+
+```mermaid
+graph TB
+    subgraph "Health Monitoring"
+        A[Integration Status] --> B[Legacy Health]
+        A --> C[libp2p Health]
+        A --> D[Bridge Health]
+        A --> E[Overall Score]
+    end
+
+    subgraph "Metrics Collection"
+        F[Connection Counts] --> G[Legacy Connections]
+        F --> H[libp2p Connections]
+        F --> I[Total Connections]
+
+        J[Message Metrics] --> K[Messages Sent]
+        J --> L[Messages Received]
+        J --> M[Message Latency]
+
+        N[Network Metrics] --> O[Peer Discovery]
+        N --> P[Network Latency]
+        N --> Q[Bandwidth Usage]
+    end
+
+    subgraph "Health Scoring"
+        R[Health Score] --> S[0-100 Scale]
+        S --> T[Connection Weight: 40%]
+        S --> U[Message Weight: 30%]
+        S --> V[Network Weight: 30%]
+    end
+
+    subgraph "Alerting"
+        W[Health Thresholds] --> X[Warning Level]
+        W --> Y[Error Level]
+        W --> Z[Critical Level]
+    end
+```
+
+## 🚀 **Migration and Transition Phases**
+
+```mermaid
+gantt
+    title Neptune Core P2P Migration Timeline
+    dateFormat  YYYY-MM-DD
+    section Phase 1
+    Module Structure     :done,    p1-1, 2024-01-01, 2024-01-15
+    Configuration       :done,    p1-2, 2024-01-16, 2024-01-30
+    Error Handling      :done,    p1-3, 2024-02-01, 2024-02-15
+
+    section Phase 2
+    Core Networking     :done,    p2-1, 2024-02-16, 2024-03-15
+    Transport Service   :done,    p2-2, 2024-03-16, 2024-04-01
+    Discovery Service   :done,    p2-3, 2024-04-02, 2024-04-15
+
+    section Phase 3
+    Protocol Handler    :done,    p3-1, 2024-04-16, 2024-05-01
+    Message Codec       :done,    p3-2, 2024-05-02, 2024-05-15
+    Enhanced Protocols  :done,    p3-3, 2024-05-16, 2024-06-01
+
+    section Phase 4
+    Legacy Bridge       :done,    p4-1, 2024-06-02, 2024-06-15
+    Message Adapter     :done,    p4-2, 2024-06-16, 2024-07-01
+    Compatibility       :done,    p4-3, 2024-07-02, 2024-07-15
+
+    section Phase 5
+    Integration Service :active,  p5-1, 2024-07-16, 2024-08-01
+    Application Wiring  :         p5-2, 2024-08-02, 2024-08-15
+    Testing & Validation:         p5-3, 2024-08-16, 2024-09-01
+
+    section Phase 6
+    Production Deployment:         p6-1, 2024-09-02, 2024-09-15
+    Legacy Deprecation :         p6-2, 2024-09-16, 2024-10-01
+    Full Migration     :         p6-3, 2024-10-02, 2024-10-15
+```
+
+## 🔄 **Protocol Stack and Message Flow**
+
+```mermaid
+graph TB
+    subgraph "Application Layer"
+        A[Neptune Core] --> B[Block/Transaction]
+        A --> C[Peer Management]
+        A --> D[Network Status]
+    end
+
+    subgraph "Integration Layer"
+        E[P2pIntegrationService] --> F[Message Router]
+        E --> G[Protocol Handler]
+        E --> H[Status Monitor]
+    end
+
+    subgraph "Protocol Translation"
+        I[MessageAdapter] --> J[Legacy ↔ Internal]
+        I --> K[Internal ↔ libp2p]
+        I --> L[Validation & Routing]
+    end
+
+    subgraph "Network Layer"
+        M[Legacy TCP] --> N[Legacy Peers]
+        O[libp2p Stack] --> P[libp2p Peers]
+    end
+
+    subgraph "libp2p Protocol Stack"
+        Q[Application Protocol] --> R[Gossipsub/Floodsub]
+        Q --> S[Request-Response]
+        Q --> T[Identify/Ping]
+        Q --> U[Kademlia DHT]
+        Q --> V[mDNS/Rendezvous]
+        Q --> W[Circuit Relay]
+        Q --> X[AutoNAT/DCUtR]
+    end
+
+    subgraph "Transport Layer"
+        Y[TCP] --> Z[Noise Encryption]
+        Z --> AA[Yamux Multiplexing]
+    end
+
+    %% Connections
+    A --> E
+    E --> I
+    I --> M
+    I --> O
+    O --> Q
+    Q --> Y
+```
+
+## 🎯 **Key Features and Benefits**
 
 ### **Enhanced libp2p Protocols**
-- **Identify**: Peer information exchange and version negotiation
-- **Ping**: Connection health monitoring with RTT calculation
-- **Kademlia DHT**: Distributed peer discovery and routing
+
+- **Identify**: Peer information and version negotiation
+- **Ping**: Connection health monitoring
+- **Kademlia DHT**: Distributed peer discovery
 - **mDNS**: Local network peer discovery
-- **Gossipsub**: Efficient message broadcasting and subscription
-- **Request-Response**: Direct peer communication for specific requests
+- **Gossipsub**: Efficient message broadcasting
+- **Request-Response**: Direct peer communication
+- **Circuit Relay**: NAT traversal and connection establishment
+- **AutoNAT**: Automatic NAT detection and external address discovery
+- **DCUtR**: Direct connection upgrade through relay
+- **Rendezvous**: Peer discovery through rendezvous points
+- **Floodsub**: Simple message flooding alternative
 
 ### **Compatibility Bridge Benefits**
-- **Seamless Migration**: Gradual transition from legacy to new network
-- **Dual Protocol Support**: Operate both networks simultaneously
-- **Message Translation**: Automatic conversion between protocol formats
-- **Backward Compatibility**: Maintain existing functionality during transition
+
+- **Zero Downtime Migration**: Both systems run simultaneously
+- **Backward Compatibility**: Legacy peers continue working
+- **Protocol Translation**: Seamless message conversion
+- **Gradual Migration**: Peers migrate at their own pace
+- **Hybrid Operation**: Support for mixed legacy/new networks
 
 ### **Performance Improvements**
-- **Modern Networking**: Industry-standard libp2p protocols
-- **Efficient Discovery**: Kademlia DHT for scalable peer discovery
-- **Optimized Transport**: TCP + Noise + Yamux for performance
-- **Message Compression**: zstd compression for reduced bandwidth
-- **Encryption**: ChaCha20-Poly1305 for secure communication
+
+- **Enhanced Discovery**: Multiple peer discovery methods
+- **NAT Traversal**: Automatic NAT detection and relay
+- **Connection Resilience**: Automatic reconnection and recovery
+- **Load Balancing**: Intelligent connection distribution
+- **Message Optimization**: Efficient routing and delivery
 
 ### **Scalability Features**
-- **Distributed Discovery**: Kademlia DHT for large-scale networks
-- **Efficient Routing**: TTL-based message routing
-- **Connection Multiplexing**: Yamux for multiple streams per connection
-- **Peer Management**: Intelligent peer caching and cleanup
 
-This architecture provides a robust, scalable, and future-proof P2P networking solution while maintaining full backward compatibility with the existing Neptune Core implementation.
+- **DHT-based Discovery**: Scalable peer discovery
+- **Protocol Multiplexing**: Multiple protocols over single connection
+- **Connection Pooling**: Efficient connection management
+- **Message Queuing**: Asynchronous message processing
+- **Health Monitoring**: Proactive issue detection
+
+---
+
+This complete architecture provides Neptune Core with a robust, scalable, and future-proof P2P networking foundation while maintaining full backward compatibility with existing legacy networks. The integration layer ensures seamless operation and migration between the old and new networking systems.

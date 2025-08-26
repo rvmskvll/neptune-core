@@ -1,20 +1,20 @@
 //! P2P networking layer for Neptune Core
-//! 
+//!
 //! This module provides a modular networking implementation that supports both
 //! legacy TCP-based protocols and modern libp2p protocols through a compatibility bridge.
-//! 
+//!
 //! ## Architecture
-//! 
+//!
 //! - **`network/`** - Core libp2p networking service
 //! - **`protocol/`** - Application protocol message handling
 //! - **`bridge/`** - Legacy protocol compatibility layer
 //! - **`config/`** - Network configuration management
-//! 
+//!
 //! ## Usage
-//! 
+//!
 //! ```rust
 //! use neptune_core::p2p::{NetworkService, NetworkConfig};
-//! 
+//!
 //! let config = NetworkConfig::default();
 //! let network = NetworkService::new(config).await?;
 //! network.start().await?;
@@ -22,12 +22,14 @@
 
 pub mod bridge;
 pub mod config;
+pub mod integration;
 pub mod network;
 pub mod protocol;
 
 // Re-export main types for easy access
 pub use bridge::LegacyBridge;
 pub use config::NetworkConfig;
+pub use integration::{ApplicationMessage, IntegrationStatus, NetworkEvent, P2pIntegrationService};
 pub use network::NetworkService;
 pub use protocol::ProtocolHandler;
 
@@ -42,19 +44,19 @@ pub type P2pResult<T> = Result<T, P2pError>;
 pub enum P2pError {
     #[error("Network service error: {0}")]
     Network(#[from] network::NetworkError),
-    
+
     #[error("Protocol error: {0}")]
     Protocol(#[from] protocol::ProtocolError),
-    
+
     #[error("Bridge error: {0}")]
     Bridge(#[from] bridge::BridgeError),
-    
+
     #[error("Configuration error: {0}")]
     Config(#[from] config::ConfigError),
-    
+
     #[error("Legacy compatibility error: {0}")]
     Legacy(String),
-    
+
     #[error("Internal error: {0}")]
     Internal(String),
 }
@@ -62,13 +64,12 @@ pub enum P2pError {
 impl P2pError {
     /// Check if this error is recoverable
     pub fn is_recoverable(&self) -> bool {
-        matches!(self, 
-            P2pError::Network(_) | 
-            P2pError::Protocol(_) |
-            P2pError::Config(_)
+        matches!(
+            self,
+            P2pError::Network(_) | P2pError::Protocol(_) | P2pError::Config(_)
         )
     }
-    
+
     /// Check if this error indicates a legacy protocol issue
     pub fn is_legacy_related(&self) -> bool {
         matches!(self, P2pError::Legacy(_) | P2pError::Bridge(_))
@@ -122,7 +123,7 @@ mod tests {
     fn test_p2p_error_recoverable() {
         let network_error = P2pError::Network(network::NetworkError::ConnectionFailed);
         assert!(network_error.is_recoverable());
-        
+
         let internal_error = P2pError::Internal("test".to_string());
         assert!(!internal_error.is_recoverable());
     }
@@ -131,7 +132,7 @@ mod tests {
     fn test_p2p_error_legacy_related() {
         let legacy_error = P2pError::Legacy("test".to_string());
         assert!(legacy_error.is_legacy_related());
-        
+
         let config_error = P2pError::Config(config::ConfigError::InvalidPort);
         assert!(!config_error.is_legacy_related());
     }

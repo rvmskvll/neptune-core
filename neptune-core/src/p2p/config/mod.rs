@@ -1,5 +1,5 @@
 //! Network configuration management for P2P networking
-//! 
+//!
 //! This module provides configuration structures and validation for both
 //! legacy and libp2p networking components.
 
@@ -63,12 +63,18 @@ pub struct DiscoveryConfig {
     pub enable_kademlia: bool,
     /// Enable mDNS for local discovery
     pub enable_mdns: bool,
+    /// Enable Rendezvous for peer discovery through rendezvous points
+    pub enable_rendezvous: bool,
     /// Bootstrap nodes for DHT
     pub bootstrap_nodes: Vec<String>,
+    /// Neptune-specific bootstrap nodes
+    pub neptune_bootstrap_nodes: Vec<String>,
     /// Discovery interval
     pub discovery_interval: Duration,
     /// Maximum peers to discover
     pub max_discovered_peers: usize,
+    /// Peer discovery timeout
+    pub discovery_timeout: Duration,
 }
 
 impl Default for DiscoveryConfig {
@@ -76,11 +82,15 @@ impl Default for DiscoveryConfig {
         Self {
             enable_kademlia: true,
             enable_mdns: true,
-            bootstrap_nodes: vec![
-                "QmNnooDu7bfjPFoTaLxpMpVq4uEbgvnq6ckv2ytLc4fqxG".to_string(),
+            enable_rendezvous: true,
+            bootstrap_nodes: vec!["QmNnooDu7bfjPFoTaLxpMpVq4uEbgvnq6ckv2ytLc4fqxG".to_string()],
+            neptune_bootstrap_nodes: vec![
+                // TODO: Add actual Neptune Core bootstrap nodes
+                // Format: "/ip4/IP_ADDRESS/tcp/PORT/p2p/PEER_ID"
             ],
             discovery_interval: Duration::from_secs(300),
-            max_discovered_peers: 100,
+            max_discovered_peers: 1000,
+            discovery_timeout: Duration::from_secs(60),
         }
     }
 }

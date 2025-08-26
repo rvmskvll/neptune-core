@@ -80,28 +80,28 @@ impl NetworkConfig {
         // Validate transport configuration
         if self.transport.tcp_port == 0 {
             return Err(crate::p2p::P2pError::Config(
-                crate::p2p::config::ConfigError::InvalidPort
+                crate::p2p::config::ConfigError::InvalidPort,
             ));
         }
 
         // Validate discovery configuration
         if self.discovery.max_discovered_peers == 0 {
             return Err(crate::p2p::P2pError::Config(
-                crate::p2p::config::ConfigError::InvalidPeerLimit
+                crate::p2p::config::ConfigError::InvalidPeerLimit,
             ));
         }
 
         // Validate protocol configuration
         if self.protocol.max_message_size == 0 {
             return Err(crate::p2p::P2pError::Config(
-                crate::p2p::config::ConfigError::InvalidMessageSize
+                crate::p2p::config::ConfigError::InvalidMessageSize,
             ));
         }
 
         // Validate legacy configuration
         if self.legacy.enable_legacy && self.legacy.max_legacy_connections == 0 {
             return Err(crate::p2p::P2pError::Config(
-                crate::p2p::config::ConfigError::InvalidPeerLimit
+                crate::p2p::config::ConfigError::InvalidPeerLimit,
             ));
         }
 
@@ -111,8 +111,8 @@ impl NetworkConfig {
                 if !self.legacy.enable_legacy {
                     return Err(crate::p2p::P2pError::Config(
                         crate::p2p::config::ConfigError::ModeMismatch(
-                            "LegacyOnly mode requires legacy networking to be enabled".to_string()
-                        )
+                            "LegacyOnly mode requires legacy networking to be enabled".to_string(),
+                        ),
                     ));
                 }
             }
@@ -120,8 +120,8 @@ impl NetworkConfig {
                 if !self.transport.enable_noise || !self.transport.enable_yamux {
                     return Err(crate::p2p::P2pError::Config(
                         crate::p2p::config::ConfigError::ModeMismatch(
-                            "Libp2pOnly mode requires full libp2p features".to_string()
-                        )
+                            "Libp2pOnly mode requires full libp2p features".to_string(),
+                        ),
                     ));
                 }
             }
@@ -130,8 +130,9 @@ impl NetworkConfig {
                 if !self.legacy.enable_legacy {
                     return Err(crate::p2p::P2pError::Config(
                         crate::p2p::config::ConfigError::ModeMismatch(
-                            "Compatibility mode requires legacy networking to be enabled".to_string()
-                        )
+                            "Compatibility mode requires legacy networking to be enabled"
+                                .to_string(),
+                        ),
                     ));
                 }
             }
@@ -142,8 +143,8 @@ impl NetworkConfig {
 
     /// Check if legacy networking is enabled
     pub fn legacy_enabled(&self) -> bool {
-        self.legacy.enable_legacy && 
-        (self.mode == NetworkMode::LegacyOnly || self.mode == NetworkMode::Compatibility)
+        self.legacy.enable_legacy
+            && (self.mode == NetworkMode::LegacyOnly || self.mode == NetworkMode::Compatibility)
     }
 
     /// Check if libp2p networking is enabled
@@ -165,23 +166,26 @@ impl NetworkConfig {
         Self {
             mode: NetworkMode::Compatibility,
             transport: TransportConfig {
-                tcp_port: 0, // Let OS assign port
+                tcp_port: 0,         // Let OS assign port
                 enable_noise: false, // Disable for testing
                 enable_yamux: false, // Disable for testing
                 connection_timeout: Duration::from_secs(5),
                 keep_alive_interval: Duration::from_secs(10),
             },
             discovery: DiscoveryConfig {
-                enable_kademlia: false, // Disable for testing
-                enable_mdns: false, // Disable for testing
+                enable_kademlia: false,   // Disable for testing
+                enable_mdns: false,       // Disable for testing
+                enable_rendezvous: false, // Disable for testing
                 bootstrap_nodes: vec![],
+                neptune_bootstrap_nodes: vec![],
                 discovery_interval: Duration::from_secs(60),
                 max_discovered_peers: 10,
+                discovery_timeout: Duration::from_secs(60),
             },
             protocol: ProtocolConfig {
                 enable_gossipsub: false, // Disable for testing
                 enable_request_response: true,
-                enable_ping: false, // Disable for testing
+                enable_ping: false,            // Disable for testing
                 max_message_size: 1024 * 1024, // 1MB for testing
                 protocol_timeout: Duration::from_secs(10),
             },
@@ -192,10 +196,10 @@ impl NetworkConfig {
                 max_legacy_connections: 5,
             },
             features: FeatureFlags {
-                nat_traversal: false, // Disable for testing
-                connection_resilience: false, // Disable for testing
+                nat_traversal: false,          // Disable for testing
+                connection_resilience: false,  // Disable for testing
                 performance_monitoring: false, // Disable for testing
-                detailed_logging: true, // Enable for testing
+                detailed_logging: true,        // Enable for testing
             },
         }
     }
@@ -229,7 +233,7 @@ mod tests {
     #[test]
     fn test_network_config_validation() {
         let mut config = NetworkConfig::default();
-        
+
         // Valid configuration should pass
         assert!(config.validate().is_ok());
 

@@ -115,10 +115,10 @@ rayon = "1.10"
 humantime = "2.1.0"
 
 # libp2p networking dependencies
-libp2p = { version = "0.54", features = [
+libp2p = { version = "0.56", features = [
     "tokio", "tcp", "noise", "macros", "identify",
     "ping", "kad", "mdns", "gossipsub", "yamux",
-    "request-response"
+    "request-response", "relay", "autonat", "dcutr", "rendezvous", "floodsub"
 ]}
 
 # Compression and encryption

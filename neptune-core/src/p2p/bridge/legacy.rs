@@ -1,180 +1,340 @@
-//! Legacy TCP networking service for compatibility
-//! 
-//! This module provides a wrapper around the existing legacy TCP-based
-//! networking implementation to maintain compatibility during migration.
+//! Legacy TCP network service for backward compatibility
+//!
+//! This module provides a bridge between the existing legacy TCP-based P2P
+//! implementation and the new libp2p networking layer.
 
-use super::{BridgeError, BridgeStatus, MigrationPhase};
-use crate::p2p::config::LegacyConfig;
+use crate::p2p::bridge::adapter::MessageAdapter;
+use crate::p2p::bridge::{BridgeStatus, InternalMessage, MigrationPhase};
+use crate::p2p::config::NetworkConfig;
+use crate::p2p::{NetworkMetrics, NetworkStatus, P2pResult};
+use futures::StreamExt;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use tokio::net::TcpListener;
-use tokio::task::JoinHandle;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{mpsc, RwLock};
+use tokio_serde::{Framed, SymmetricalBincode};
+use tokio_util::codec::LengthDelimitedCodec;
+use tracing::{debug, error, info, warn};
 
-/// Legacy network service that wraps existing TCP networking
+/// Legacy Neptune Core peer message types
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum LegacyPeerMessage {
+    /// Handshake message
+    Handshake {
+        version: String,
+        instance_id: String,
+        timestamp: u64,
+    },
+    /// Block message
+    Block {
+        block_data: Vec<u8>,
+        block_hash: String,
+    },
+    /// Transaction message
+    Transaction { tx_data: Vec<u8>, tx_hash: String },
+    /// Peer list request
+    PeerListRequest,
+    /// Peer list response
+    PeerListResponse { peers: Vec<SocketAddr> },
+    /// Sync challenge
+    SyncChallenge { challenge: Vec<u8> },
+    /// Sync response
+    SyncResponse { response: Vec<u8> },
+    /// Ping message
+    Ping { timestamp: u64 },
+    /// Pong response
+    Pong { timestamp: u64 },
+    /// Error message
+    Error {
+        error_code: u32,
+        error_message: String,
+    },
+}
+
+/// Legacy connection information
+#[derive(Debug, Clone)]
+pub struct LegacyConnectionInfo {
+    /// Remote socket address
+    pub remote_addr: SocketAddr,
+    /// Connection established timestamp
+    pub established: std::time::Instant,
+    /// Last activity timestamp
+    pub last_activity: std::time::Instant,
+    /// Connection status
+    pub status: LegacyConnectionStatus,
+    /// Peer version
+    pub version: Option<String>,
+    /// Instance ID
+    pub instance_id: Option<String>,
+}
+
+/// Legacy connection status
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LegacyConnectionStatus {
+    /// Connection established, waiting for handshake
+    Connecting,
+    /// Handshake completed, connection active
+    Connected,
+    /// Connection closed
+    Closed,
+    /// Connection error
+    Error(String),
+}
+
+/// Legacy network service that handles TCP connections
 pub struct LegacyNetworkService {
-    /// Legacy configuration
-    config: LegacyConfig,
-    /// Bridge status reference
-    status: Arc<RwLock<BridgeStatus>>,
+    /// Network configuration
+    config: NetworkConfig,
     /// TCP listener for incoming connections
     listener: Option<TcpListener>,
-    /// Active connection handles
-    connections: Vec<JoinHandle<()>>,
+    /// Active legacy connections
+    connections: Arc<RwLock<HashMap<SocketAddr, LegacyConnectionInfo>>>,
+    /// Message adapter for protocol conversion
+    message_adapter: MessageAdapter,
+    /// Channel for sending messages to the bridge
+    bridge_tx: mpsc::Sender<InternalMessage>,
     /// Service running flag
     running: bool,
+    /// Bridge status reference
+    bridge_status: Arc<RwLock<BridgeStatus>>,
 }
 
 impl LegacyNetworkService {
     /// Create a new legacy network service
-    pub async fn new(
-        config: LegacyConfig,
-        status: Arc<RwLock<BridgeStatus>>,
-    ) -> Result<Self, BridgeError> {
-        let listener = if config.enable_legacy {
-            let addr = format!("0.0.0.0:{}", config.legacy_port);
-            let listener = TcpListener::bind(&addr).await
-                .map_err(|e| BridgeError::ConnectionError(
-                    format!("Failed to bind legacy listener: {}", e)
-                ))?;
-            Some(listener)
-        } else {
-            None
-        };
+    pub fn new(
+        config: NetworkConfig,
+        bridge_tx: mpsc::Sender<InternalMessage>,
+        bridge_status: Arc<RwLock<BridgeStatus>>,
+    ) -> P2pResult<Self> {
+        let message_adapter = MessageAdapter::new();
 
         Ok(Self {
             config,
-            status,
-            listener,
-            connections: Vec::new(),
+            listener: None,
+            connections: Arc::new(RwLock::new(HashMap::new())),
+            message_adapter,
+            bridge_tx,
             running: false,
+            bridge_status,
         })
     }
 
     /// Start the legacy network service
-    pub async fn start(&mut self) -> Result<(), BridgeError> {
-        if !self.config.enable_legacy {
-            return Ok(());
-        }
-
+    pub async fn start(&mut self) -> P2pResult<()> {
         if self.running {
-            return Err(BridgeError::ConnectionError(
-                "Legacy service already running".to_string()
+            return Err(crate::p2p::P2pError::Bridge(
+                crate::p2p::bridge::BridgeError::ConfigurationError(
+                    "Legacy service already running".to_string(),
+                ),
             ));
         }
 
+        // Bind TCP listener
+        let listen_addr = format!("0.0.0.0:{}", self.config.transport.tcp_port);
+        let listener = TcpListener::bind(&listen_addr).await.map_err(|e| {
+            crate::p2p::P2pError::Bridge(crate::p2p::bridge::BridgeError::ConnectionError(format!(
+                "Failed to bind TCP listener: {}",
+                e
+            )))
+        })?;
+
+        info!("Legacy TCP listener bound to {}", listen_addr);
+        self.listener = Some(listener);
         self.running = true;
 
-        // Start connection acceptor if listener is available
-        if let Some(listener) = self.listener.take() {
-            let config = self.config.clone();
-            let status = self.status.clone();
-            
-            let acceptor_handle = tokio::spawn(async move {
-                Self::accept_connections(listener, config, status).await;
-            });
-            
-            self.connections.push(acceptor_handle);
-        }
+        // Start accepting connections
+        self.accept_connections().await?;
 
         Ok(())
     }
 
     /// Stop the legacy network service
-    pub async fn stop(&mut self) -> Result<(), BridgeError> {
+    pub async fn stop(&mut self) -> P2pResult<()> {
         if !self.running {
             return Ok(());
         }
 
         self.running = false;
 
-        // Cancel all connection handles
-        for handle in self.connections.drain(..) {
-            handle.abort();
+        // Close all connections
+        let mut connections = self.connections.write().await;
+        for (addr, conn_info) in connections.iter_mut() {
+            conn_info.status = LegacyConnectionStatus::Closed;
+            info!("Closed legacy connection to {}", addr);
+        }
+        connections.clear();
+
+        // Close listener
+        if let Some(listener) = self.listener.take() {
+            drop(listener);
         }
 
-        // Update status
-        let mut status = self.status.write().await;
-        status.legacy_connections = 0;
+        info!("Legacy network service stopped");
+        Ok(())
+    }
+
+    /// Accept incoming TCP connections
+    async fn accept_connections(&mut self) -> P2pResult<()> {
+        let listener = self.listener.as_mut().ok_or_else(|| {
+            crate::p2p::P2pError::Bridge(crate::p2p::bridge::BridgeError::ConfigurationError(
+                "TCP listener not initialized".to_string(),
+            ))
+        })?;
+
+        let connections = self.connections.clone();
+        let bridge_tx = self.bridge_tx.clone();
+        let message_adapter = self.message_adapter.clone();
+
+        // Spawn connection acceptor
+        tokio::spawn(async move {
+            loop {
+                match listener.accept().await {
+                    Ok((socket, addr)) => {
+                        debug!("Legacy TCP connection from {}", addr);
+
+                        // Add connection to tracking
+                        let conn_info = LegacyConnectionInfo {
+                            remote_addr: addr,
+                            established: std::time::Instant::now(),
+                            last_activity: std::time::Instant::now(),
+                            status: LegacyConnectionStatus::Connecting,
+                            version: None,
+                            instance_id: None,
+                        };
+
+                        {
+                            let mut connections = connections.write().await;
+                            connections.insert(addr, conn_info);
+                        }
+
+                        // Spawn connection handler
+                        let connections_clone = connections.clone();
+                        let bridge_tx_clone = bridge_tx.clone();
+                        let message_adapter_clone = message_adapter.clone();
+
+                        tokio::spawn(async move {
+                            Self::handle_legacy_connection(
+                                socket,
+                                addr,
+                                connections_clone,
+                                bridge_tx_clone,
+                                message_adapter_clone,
+                            )
+                            .await;
+                        });
+                    }
+                    Err(e) => {
+                        error!("Failed to accept legacy TCP connection: {}", e);
+                    }
+                }
+            }
+        });
 
         Ok(())
     }
 
-    /// Accept incoming legacy connections
-    async fn accept_connections(
-        mut listener: TcpListener,
-        config: LegacyConfig,
-        status: Arc<RwLock<BridgeStatus>>,
+    /// Handle individual legacy TCP connection
+    async fn handle_legacy_connection(
+        socket: TcpStream,
+        addr: SocketAddr,
+        connections: Arc<RwLock<HashMap<SocketAddr, LegacyConnectionInfo>>>,
+        bridge_tx: mpsc::Sender<InternalMessage>,
+        message_adapter: MessageAdapter,
     ) {
-        loop {
-            match listener.accept().await {
-                Ok((socket, addr)) => {
-                    // Check connection limit
-                    let current_connections = {
-                        let status_guard = status.read().await;
-                        status_guard.legacy_connections
-                    };
+        let codec = LengthDelimitedCodec::new();
+        let framed = Framed::new(socket, SymmetricalBincode::<LegacyPeerMessage>::new(codec));
 
-                    if current_connections >= config.max_legacy_connections {
-                        // Reject connection if limit reached
-                        let _ = socket.shutdown().await;
-                        continue;
-                    }
+        let (mut tx, mut rx) = framed.split();
 
-                    // Spawn connection handler
-                    let config_clone = config.clone();
-                    let status_clone = status.clone();
-                    
-                    let connection_handle = tokio::spawn(async move {
-                        Self::handle_legacy_connection(socket, addr, config_clone, status_clone).await;
-                    });
+        // Send handshake
+        let handshake = LegacyPeerMessage::Handshake {
+            version: "0.3.0".to_string(),
+            instance_id: format!("neptune-legacy-{}", uuid::Uuid::new_v4()),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        };
 
-                    // Update connection count
+        if let Err(e) = tx.send(handshake).await {
+            error!("Failed to send handshake to {}: {}", addr, e);
+            Self::close_connection(addr, connections).await;
+            return;
+        }
+
+        // Update connection status
+        {
+            let mut connections = connections.write().await;
+            if let Some(conn_info) = connections.get_mut(&addr) {
+                conn_info.status = LegacyConnectionStatus::Connected;
+            }
+        }
+
+        // Handle incoming messages
+        while let Some(result) = rx.next().await {
+            match result {
+                Ok(message) => {
+                    // Update last activity
                     {
-                        let mut status_guard = status.write().await;
-                        status_guard.legacy_connections += 1;
+                        let mut connections = connections.write().await;
+                        if let Some(conn_info) = connections.get_mut(&addr) {
+                            conn_info.last_activity = std::time::Instant::now();
+
+                            // Extract version and instance ID from handshake
+                            if let LegacyPeerMessage::Handshake {
+                                version,
+                                instance_id,
+                                ..
+                            } = &message
+                            {
+                                conn_info.version = Some(version.clone());
+                                conn_info.instance_id = Some(instance_id.clone());
+                            }
+                        }
                     }
 
-                    // Store handle (this would need to be managed properly in a real implementation)
-                    drop(connection_handle);
+                    // Convert legacy message to internal format
+                    let internal_message = message_adapter.legacy_to_internal(message);
+
+                    // Send to bridge
+                    if let Err(e) = bridge_tx.send(internal_message).await {
+                        error!("Failed to send message to bridge: {}", e);
+                        break;
+                    }
                 }
                 Err(e) => {
-                    // Log error but continue accepting
-                    tracing::warn!("Error accepting legacy connection: {}", e);
+                    error!("Error reading from legacy connection {}: {}", addr, e);
+                    break;
                 }
             }
         }
+
+        // Close connection
+        Self::close_connection(addr, connections).await;
     }
 
-    /// Handle individual legacy connection
-    async fn handle_legacy_connection(
-        socket: tokio::net::TcpStream,
+    /// Close a legacy connection
+    async fn close_connection(
         addr: SocketAddr,
-        config: LegacyConfig,
-        status: Arc<RwLock<BridgeStatus>>,
+        connections: Arc<RwLock<HashMap<SocketAddr, LegacyConnectionInfo>>>,
     ) {
-        // TODO: Implement legacy connection handling
-        // This will integrate with existing peer handling logic
-        
-        // For now, just log the connection
-        tracing::info!("Legacy connection from {}", addr);
-        
-        // Simulate connection processing
-        tokio::time::sleep(config.legacy_timeout).await;
-        
-        // Update connection count when connection closes
-        let mut status_guard = status.write().await;
-        if status_guard.legacy_connections > 0 {
-            status_guard.legacy_connections -= 1;
+        let mut connections = connections.write().await;
+        if let Some(conn_info) = connections.get_mut(&addr) {
+            conn_info.status = LegacyConnectionStatus::Closed;
         }
-        
-        tracing::info!("Legacy connection from {} closed", addr);
+        connections.remove(&addr);
+        info!("Legacy connection to {} closed", addr);
     }
 
-    /// Get current connection count
+    /// Get connection count
     pub async fn connection_count(&self) -> usize {
-        let status = self.status.read().await;
-        status.legacy_connections
+        self.connections.read().await.len()
+    }
+
+    /// Get connection information
+    pub async fn get_connections(&self) -> Vec<LegacyConnectionInfo> {
+        self.connections.read().await.values().cloned().collect()
     }
 
     /// Check if service is running
@@ -182,16 +342,23 @@ impl LegacyNetworkService {
         self.running
     }
 
-    /// Get configuration
-    pub fn config(&self) -> &LegacyConfig {
-        &self.config
+    /// Send message to legacy peer
+    pub async fn send_message(
+        &self,
+        addr: SocketAddr,
+        message: LegacyPeerMessage,
+    ) -> P2pResult<()> {
+        // TODO: Implement sending messages to specific legacy peers
+        // This requires maintaining a map of active connections and their writers
+        debug!("Sending message to legacy peer {}: {:?}", addr, message);
+        Ok(())
     }
 }
 
 impl Drop for LegacyNetworkService {
     fn drop(&mut self) {
         if self.running {
-            // Try to stop gracefully, but don't block
+            // Try to stop gracefully
             let _ = tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(self.stop())
             });
@@ -202,43 +369,45 @@ impl Drop for LegacyNetworkService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::p2p::config::LegacyConfig;
+    use crate::p2p::config::NetworkConfig;
 
     #[tokio::test]
     async fn test_legacy_service_creation() {
-        let config = LegacyConfig::default();
-        let status = Arc::new(RwLock::new(BridgeStatus {
+        let config = NetworkConfig::default();
+        let (bridge_tx, _) = mpsc::channel(100);
+        let bridge_status = Arc::new(RwLock::new(BridgeStatus {
             migration_phase: MigrationPhase::DualProtocol,
             legacy_connections: 0,
             libp2p_connections: 0,
             migration_progress: 0.0,
         }));
-        
-        let service = LegacyNetworkService::new(config, status).await;
+
+        let service = LegacyNetworkService::new(config, bridge_tx, bridge_status);
         assert!(service.is_ok());
     }
 
     #[tokio::test]
     async fn test_legacy_service_lifecycle() {
-        let mut config = LegacyConfig::default();
-        config.legacy_port = 0; // Let OS assign port for testing
-        
-        let status = Arc::new(RwLock::new(BridgeStatus {
+        let mut config = NetworkConfig::default();
+        config.transport.tcp_port = 0; // Let OS assign port for testing
+
+        let (bridge_tx, _) = mpsc::channel(100);
+        let bridge_status = Arc::new(RwLock::new(BridgeStatus {
             migration_phase: MigrationPhase::DualProtocol,
             legacy_connections: 0,
             libp2p_connections: 0,
             migration_progress: 0.0,
         }));
-        
-        let mut service = LegacyNetworkService::new(config, status).await.unwrap();
-        
+
+        let mut service = LegacyNetworkService::new(config, bridge_tx, bridge_status).unwrap();
+
         // Service should not be running initially
         assert!(!service.is_running());
-        
+
         // Start service
         assert!(service.start().await.is_ok());
         assert!(service.is_running());
-        
+
         // Stop service
         assert!(service.stop().await.is_ok());
         assert!(!service.is_running());
@@ -246,17 +415,18 @@ mod tests {
 
     #[test]
     fn test_legacy_config_access() {
-        let config = LegacyConfig::default();
-        let status = Arc::new(RwLock::new(BridgeStatus {
+        let config = NetworkConfig::default();
+        let (bridge_tx, _) = mpsc::channel(100);
+        let bridge_status = Arc::new(RwLock::new(BridgeStatus {
             migration_phase: MigrationPhase::DualProtocol,
             legacy_connections: 0,
             libp2p_connections: 0,
             migration_progress: 0.0,
         }));
-        
+
         // This would need to be async in real usage
         // For now, just test the config access
-        assert_eq!(config.legacy_port, 9798);
-        assert!(config.enable_legacy);
+        assert_eq!(config.transport.tcp_port, 9798);
+        assert!(config.transport.enable_tcp);
     }
 }
